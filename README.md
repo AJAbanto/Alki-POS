@@ -8,7 +8,7 @@ This is my first major Qt-based software. I initially intended it to be a freebi
 4. Custom product-code assignment
 5. User restrictions based on privilages 
 
-## Upcomming features:
+## Upcoming features:
 1. Ability of users to use which ever MySQL database they wish to use
 2. Thermal Printer Support
 3. Sales analytics and Cash flow diagrams/graphs
