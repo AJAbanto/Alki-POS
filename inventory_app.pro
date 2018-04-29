@@ -4,7 +4,7 @@
 #
 #-------------------------------------------------
 
-QT       += core gui widgets sql
+QT       += core gui widgets sql printsupport
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
@@ -25,13 +25,18 @@ DEFINES += QT_DEPRECATED_WARNINGS
 
 SOURCES += \
         main.cpp \
-        mainwindow.cpp
+        mainwindow.cpp \
+    databasedialog.cpp
+
 
 HEADERS += \
-        mainwindow.h
+        mainwindow.h \
+    databasedialog.h
 
 FORMS += \
-        mainwindow.ui
+        mainwindow.ui \
+    databasedialog.ui
+
 
 
 
@@ -43,3 +48,6 @@ win32: LIBS += -L$$PWD/'../../../../../../Program Files (x86)/MySQL/MySQL Connec
 
 INCLUDEPATH += $$PWD/'../../../../../../Program Files (x86)/MySQL/MySQL Connector C 6.1/include'
 DEPENDPATH += $$PWD/'../../../../../../Program Files (x86)/MySQL/MySQL Connector C 6.1/include'
+
+RESOURCES += \
+    fonts.qrc

@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
+#include "databasedialog.h"
 #include <QtSql/QtSql>
 #include <QtSql/QSqlQuery>
 #include <QtSql/QSqlDatabase>
@@ -10,6 +11,12 @@
 #include <QCompleter>
 #include <QMessageBox>
 #include <QInputDialog>
+#include <QtPrintSupport/QPrintDialog>
+#include <QtPrintSupport/QPrinter>
+#include <QPainter>
+#include <QFontDatabase>
+
+
 
 
 MainWindow::MainWindow(QWidget *parent) :
@@ -20,12 +27,17 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->progpage->setCurrentWidget(ui->Loginpage);
     ui->progpage->showMaximized();
 
-                                //creating connection
+                                                                               //creating connection
     if(createconnection()){
         qDebug()<< "Connected to server";
         setTables();
-        setCompleters();                //set completer or all search bars
+        setCompleters();                                                        //set completer for all search bars
     }
+
+    int id = QFontDatabase::addApplicationFont(":/fonts/fre3of9x.ttf");             //setting barcode fonts from resourcefile
+    QString family = QFontDatabase::applicationFontFamilies(id).at(0);
+    BarFont.setFamily(family);
+
 
 }
 
@@ -70,7 +82,7 @@ void MainWindow::on_pushButton_clicked()
         ui->Ccon->clear();
         qDebug()<<"New row inserted";
 
-        //--------------repopulate table---------------
+        //-------------- re-populate table---------------
 
         custtbl->select();                 //populate table
 
@@ -80,7 +92,7 @@ void MainWindow::on_pushButton_clicked()
         ui->customertbl->show();
 
 
-        //----------------end repopulate-------------------------
+        //---------------- end repopulate -------------------------
     }
 
     if(newClist.exec("SELECT Name from tblcustomers;")){                    //filling up search bar completer
@@ -338,22 +350,35 @@ void MainWindow::on_txtbarcode_returnPressed()
             }
 
         }
+
+    getsubtotal();
+
 }
 
 void MainWindow::on_btn_cashout_clicked()
 {
-    /*
-    QSqlQuery newrecpt , lastrecpt ;
-    if(lastrecpt.exec("SELECT ID from tblreceipts; ")){            //get latest receipt number
-        lastrecpt.last();
-        newrecpt.prepare("INSERT INTO tblreceipts (ID) VALUES(?);");
-        newrecpt.bindValue(0,lastrecpt.value(0).toInt()+1);
-    if(newrecpt.exec() )
 
+    //prompt payment Dialogue box
+    bool accpt;
 
-            }
-            transtbl->select();
-      */
+    double cashamount = QInputDialog::getDouble(this,tr("Payment"), tr("Cash Amount:"),0,0,500,1,&accpt);
+
+    if(accpt){
+
+        int currrecpt = ui->latestrcpt->value();
+
+        printreceipt(cashamount);                                         //print receipt and reset table view
+
+        QSqlQuery newrecpt;
+        newrecpt.prepare("INSERT INTO tblreceipts (ID , Customer_ID) VALUES(?,5) ");
+        newrecpt.bindValue(0,currrecpt++);
+
+        if(newrecpt.exec()){
+            qDebug()<<"bruh";
+            ui->latestrcpt->setValue( ui->latestrcpt->value()+1) ;
+            ui->latestrcpt2->setValue(ui->latestrcpt->value()) ;
+        }
+    }
 
 }
 
@@ -502,6 +527,7 @@ void MainWindow::setCompleters(){
     ui->txtsearchprod->setCompleter(prodcompleter);
     ui->txtinventsearch->setCompleter(prodcompleter);
     ui->prodlookup->setCompleter(prodcompleter);
+    ui->prodlookup2->setCompleter(prodcompleter);
 
     if(recpts.exec("SELECT ID from tblreceipts; ")){            //get latest receipt number
         recpts.last();
@@ -519,7 +545,7 @@ void MainWindow::setTables(){
     transtbl = new QSqlRelationalTableModel(this, db);
 
     transtbl->setTable("tbltransactions");
-    transtbl->setRelation(3, QSqlRelation("tblproducts", "ID" , "Name"));
+    transtbl->setRelation(3, QSqlRelation("tblproducts", "ID" , "Code"));
     transtbl->setEditStrategy(QSqlTableModel::OnFieldChange);
 
 
@@ -587,18 +613,329 @@ void MainWindow::setTables(){
 
     ui->cashierview->hideColumn(1);
     ui->cashierview->hideColumn(2);
+
+    getsubtotal();
 }
 
 bool MainWindow::createconnection(){
     //open local database
-    QString host = "127.0.0.1" , dbname = "brodb" , user = "root", pwd = "";
-
     db = QSqlDatabase::addDatabase("QMYSQL");
-    db.setHostName(host);
-    db.setDatabaseName(dbname);
-    db.setUserName(user);
-    db.setPassword(pwd);
+    loadDBsettings();
     bool ok = db.open();
-
     return ok;
+}
+
+void MainWindow::loadDBsettings(){
+    QString defhost = "127.0.0.1" , defdbname = "brodb" , defuser = "root", defpwd = "";     //default db values
+
+
+
+    QSettings setting ("Ajsoftware" ,"Alki" );
+    if(setting.value("hostname").toString() == 0 || setting.value("dbname").toString() == 0 ||setting.value("user").toString() == 0 ||
+            setting.value("pwd").toString() == 0){
+        openDBsettings();                                             //prompt for database connection info
+        db.setHostName(setting.value("hostname").toString());      //getting stored settings,AFTER PROMPT
+        db.setDatabaseName(setting.value("dbname").toString());
+        db.setUserName(setting.value("user").toString());
+        db.setPassword(setting.value("pwd").toString());
+
+    }else{
+        db.setHostName(setting.value("hostname").toString());      //getting stored settings, if null give default value
+        db.setDatabaseName(setting.value("dbname").toString());
+        db.setUserName(setting.value("user").toString());
+        db.setPassword(setting.value("pwd").toString());
+    }
+
+
+
+
+}
+
+void MainWindow::openDBsettings(){
+
+    QString defhost = "127.0.0.1" , defdbname = "brodb" , defuser = "root", defpwd = "";     //default db values
+   DatabaseDialog settingsDia;                                 //open settings dialogue box
+   settingsDia.setModal(true);                                 //set modal mode
+
+   QSettings setting ("Ajsoftware" ,"Alki" );                                       //open saving settings:
+
+   settingsDia.sethost(setting.value("hostname",defhost).toString());               //getting stored settings, if null give default value
+   settingsDia.setdb(setting.value("dbname",defdbname).toString());
+   settingsDia.setuser(setting.value("user", defuser).toString());
+   settingsDia.setpass(setting.value("pwd", defpwd).toString());
+
+
+   if(settingsDia.exec()){
+           setting.setValue("hostname" , settingsDia.gethost());                       //saving values
+           setting.setValue("dbname",settingsDia.getdbname());
+           setting.setValue("user",settingsDia.getuser());
+           setting.setValue("pwd",settingsDia.getpass());
+
+       qDebug()<<"stuff:"<<settingsDia.gethost()<<" "<<settingsDia.getdbname()<<" "<<settingsDia.getpass()<<""<<settingsDia.getuser()<<" ";
+
+   }
+
+
+}
+
+void MainWindow::on_btnPrintAllBarcode_clicked()
+{
+
+     QFont sansFont("Helvetica [Cronyx]",10);    //working point size 6
+     BarFont.setPointSize(50);       //working point size 16
+                //ask to print out new receipt.
+
+                //print out receipt
+
+         QPrinter printer(QPrinter::HighResolution); //create your QPrinter (don't need to be high resolution, anyway)
+         printer.setPageSize(QPrinter::A4);
+         printer.setOrientation(QPrinter::Portrait);
+         printer.setPageMargins (15,15,15,15,QPrinter::Millimeter);
+         printer.setFullPage(false);
+         printer.setOutputFormat(QPrinter::PdfFormat);
+         printer.setOutputFileName("barcodesum.pdf");
+
+         //loop through each row
+
+         int rowCount = prodtbl->rowCount();
+         QPainter painter;
+         if (! painter.begin(&printer)) {                // failed to open file
+                qWarning("failed to open file, is it writable?");
+         }else{
+                qDebug()<<"painter initialized";
+                painter.setFont(BarFont);               //formerly used barcode front
+                qDebug()<<QString::number(BarFont.pointSize());     //Debug
+
+                QRect rect = QRect(0,0,4000,96*4);         //working was 2000 width and 96*2 height
+                QRect rect2 = QRect(0,96*4,4000,96*4);
+                QPen shape;
+                shape.setWidth(20);
+                QPen def;
+
+                    for(int i = 0 ; i < rowCount ; i++){                      //looping through table to retrieve records
+                        painter.setFont(BarFont);                                               //Painting onto summary output
+                        QString barbar = "*"+prodtbl->record(i).value(2).toString()+"*";
+                        painter.setPen(shape);
+                        painter.drawRect(rect);
+                        painter.setPen(def);
+                        painter.drawRect(rect2);
+                        painter.drawText(rect  ,Qt::AlignCenter,barbar);    //draw barcode in Code 39 Font
+                        painter.setFont(sansFont);                                                          //reset font
+                        painter.drawText(rect2,Qt::AlignHCenter,prodtbl->record(i).value(2).toString());    //draw Alpha-numeric equivalent
+                        rect.adjust(0,96*8,0,96*8);
+                        rect2.adjust(0,96*8,0,96*8);
+                     }
+
+         }
+         painter.end();
+
+
+
+
+    qDebug()<<"Bro";
+}
+
+void MainWindow::printreceipt(float cashamount){
+
+
+    QFont sansFont("Helvetica [Cronyx]",7);                                 //print out receipt
+
+         QPrinter printer(QPrinter::HighResolution);                       //create your QPrinter (don't need to be high resolution, anyway)
+         printer.setPageSize(QPrinter::A4);
+         printer.setOrientation(QPrinter::Portrait);
+         printer.setOutputFormat(QPrinter::NativeFormat);
+         printer.setFullPage(false);
+
+
+
+         int rowCount = transtbl->rowCount();
+         QPainter painter;
+         if (! painter.begin(&printer)) {                                  // failed to open file
+                qWarning("failed to open file, is it writable?");
+         }else{
+                qDebug()<<"painter initialized";
+
+                QRect rect = QRect(0,0,350,50);                          //alignment container for text
+                QPoint startline , endline;
+                painter.setFont(sansFont);
+                QPen line;                                                  //divider brush
+                QPen def;                                                   //default brush
+                float subtotal = 0;
+                line.setWidth(10);
+
+
+                    for(int i = 0 ; i < rowCount ; i++){                      //looping through table to retrieve records
+                                                                              //Painting onto receipt output
+
+
+                        if(i ==0 ){
+                            painter.drawText(rect, Qt::AlignCenter, "StoreName");
+                            rect.adjust(0,50,0,50);
+                            painter.drawText(rect,Qt::AlignHCenter, "Street Name");
+                            rect.adjust(0,50,0,50);
+                            painter.drawText(rect,Qt::AlignHCenter,"Property and City");
+                            rect.adjust(0,50,0,50);
+                            painter.drawText(rect, Qt::AlignHCenter,"Contact num");
+                            rect.adjust(0,50,0,50);
+
+                                                                             //draw dividing line
+                            startline.setX(rect.x());
+                            startline.setY(rect.y());
+                            endline = rect.topRight();
+                            painter.setPen(line);
+                            painter.drawLine(startline, endline);
+                           }
+
+                        painter.setPen(def);                                                             //reseting Pen
+
+                        QString itmname = transtbl->record(i).value(3).toString();
+                        QString qtyS = transtbl->record(i).value(5).toString();
+
+                        painter.drawText(rect  ,Qt::AlignLeft | Qt::AlignVCenter, qtyS+" "+itmname);     //name of product
+
+                        float price = transtbl->record(i).value(4).toFloat();                            //get qty and price
+                        float qty = transtbl->record(i).value(5).toFloat();
+
+                        QString total = QString::number(price*qty);                                       //convert to string
+                        painter.drawText(rect,Qt::AlignRight | Qt::AlignVCenter,total);
+                        rect.adjust(0,50,0,50);
+
+                        subtotal += (price *qty);                                                       //calculating subtotal
+                     }
+
+
+                    startline.setX(rect.x());
+                    startline.setY(rect.y());                               //closing line for item list and opening line for subtotal
+                    endline = rect.topRight();
+                    painter.setPen(line);
+                    painter.drawLine(startline, endline);
+
+                    painter.setPen(def);
+                    painter.setFont(sansFont);
+                    painter.drawText(rect, Qt::AlignLeft|Qt::AlignVCenter, "SUB TOTAL");
+                    painter.drawText(rect, Qt::AlignRight|Qt::AlignVCenter, "P"+QString::number(subtotal));
+                    rect.adjust(0,50,0,50);
+
+                    painter.drawText(rect, Qt::AlignLeft|Qt::AlignVCenter, "VAT");
+                    painter.drawText(rect, Qt::AlignRight|Qt::AlignVCenter, "P"+QString::number(subtotal*.20));      //spoof calculation
+                    rect.adjust(0,50,0,50);
+
+                    startline.setX(rect.x());
+                    startline.setY(rect.y());                               //closing line subtotal
+                    endline = rect.topRight();
+                    painter.setPen(line);
+                    painter.drawLine(startline, endline);
+
+                    painter.drawText(rect, Qt::AlignLeft|Qt::AlignVCenter,"AMOUNT DUE:");                               //actual amout due
+                    painter.drawText(rect, Qt::AlignRight|Qt::AlignVCenter, "P"+QString::number(subtotal+(subtotal*.20)));
+                    rect.adjust(0,50,0,50);
+                    painter.drawText(rect, Qt::AlignLeft|Qt::AlignVCenter,"CASH");          //must integrate payment prop
+                    painter.drawText(rect, Qt::AlignRight|Qt::AlignVCenter, "P"+QString::number(cashamount));
+                    rect.adjust(0,50,0,50);
+                    painter.drawText(rect,Qt::AlignLeft|Qt::AlignVCenter,"Change");
+                    painter.drawText(rect,Qt::AlignRight|Qt::AlignVCenter,"P500");
+                    rect.adjust(0,50,0,50);
+
+                    startline.setX(rect.x());
+                    startline.setY(rect.y());                               //closing line payment
+                    endline = rect.topRight();
+                    painter.setPen(line);
+                    painter.drawLine(startline, endline);
+
+                    rect.adjust(0,50,0,50);
+                    painter.drawText(rect,Qt::AlignCenter, "Thank you for shopping at SHOP NAME");              //end of receipt
+                    rect.adjust(0,50,0,50);
+                    painter.drawText(rect,Qt::AlignCenter, "this invoice is valid for (5) years");
+                    rect.adjust(0,50,0,50);
+                    painter.drawText(rect,Qt::AlignCenter, "Receipt number: #BLOOP");
+                    rect.adjust(0,50,0,50);
+
+         }
+
+            painter.end();
+            transtbl->select();
+
+}
+
+void MainWindow::on_pushButton_4_clicked()
+{
+
+    bool accpt;                                                                                             //flag for input dialogue
+
+    double cashamount = QInputDialog::getDouble(this,tr("Payment"), tr("Cash Amount:"),0,0,500,1,&accpt);   //prompt payment w/ inputDialogue box
+
+    if(accpt){
+
+        int currrecpt = ui->latestrcpt->value();
+
+        printreceipt(cashamount);                                         //print receipt and reset table view
+
+        QSqlQuery newrecpt;
+        newrecpt.prepare("INSERT INTO tblreceipts (ID , Customer_ID) VALUES(?,5) ");
+        newrecpt.bindValue(0,currrecpt++);
+
+        if(newrecpt.exec()){
+            qDebug()<<"bruh";
+            ui->latestrcpt->setValue( ui->latestrcpt->value()+1) ;
+            ui->latestrcpt2->setValue(ui->latestrcpt->value()) ;
+        }
+    }
+}
+
+void MainWindow::deletetrans(){
+
+
+    int latestrcpt = ui->latestrcpt->value();                   //get receipt number
+    QSqlQuery DeleteLatest;                                     //declare query
+
+    DeleteLatest.prepare("DELETE FROM tbltransactions WHERE RecieptID = ?;");
+    DeleteLatest.bindValue(0,latestrcpt);
+
+    if(DeleteLatest.exec())                                     //actual execution of query
+        qDebug()<<"Trans Deleted";
+    else
+        qDebug()<<DeleteLatest.lastError();
+
+    transtbl->select();                                         //refreshing table view
+
+
+}
+
+void MainWindow::on_btn_void_clicked()
+{
+    deletetrans();
+}
+
+void MainWindow::on_prodlookup_returnPressed()
+{
+    //search
+}
+
+void MainWindow::getsubtotal(){
+    int rowcount = transtbl->rowCount();
+
+    ui->subttl1->setValue(0);                                                       //reset subtotal spinbox values
+    ui->subttl2->setValue(0);
+
+    if(ui->subttl1->value() == ui->subttl2->value()){                                      //check if current subtotal values are same
+        qDebug()<<"this happened";
+
+        float subtotal = ui->subttl1->value();
+
+        for(int i = 0 ; i < rowcount; i++ ){
+            float price = transtbl->record(i).value(4).toFloat();                            //get qty and price
+            float qty = transtbl->record(i).value(5).toFloat();
+            subtotal+= qty*price;                                                           //calculate subtotal
+        }
+        qDebug()<<QString::number(subtotal);
+        ui->subttl1->setValue(subtotal);
+        ui->subttl2->setValue(subtotal);
+
+        ui->discnt1->setValue(subtotal*.20);
+     }
+}
+
+void MainWindow::on_pushButton_7_clicked()
+{
+    openDBsettings();
 }

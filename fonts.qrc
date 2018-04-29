@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/">
+        <file>fonts/free3of9.ttf</file>
+        <file>fonts/fre3of9x.ttf</file>
+    </qresource>
+</RCC>
